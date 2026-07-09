@@ -1,0 +1,107 @@
+version: "3.9"
+
+# Mapeamento para o Diagrama C4 Nível 2 (POC 1 — Real-Time):
+#   nginx          -> Load Balancer
+#   gateway        -> WebSocket Gateway + Rate Limiter + Broadcast (Go)
+#   room-service   -> Serviço de Sala + Event Bus consumer (Go)
+#   redis          -> Event Bus (Pub/Sub) + Armazenamento de Estado
+#   otel-collector / prometheus / grafana -> Observabilidade (perfil opcional)
+#   k6             -> Ferramenta de Carga (perfil opcional)
+#
+# Uso:
+#   docker compose up --build                       # sobe o núcleo do sistema
+#   docker compose --profile observability up -d     # + Prometheus/Grafana/OTel
+#   docker compose --profile loadtest run k6          # roda o teste de carga
+#   docker compose up --build --scale gateway=3       # simula múltiplos nós do Gateway
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: poc-load-balancer
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - gateway
+    networks:
+      - poc-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: poc-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - poc-net
+
+  gateway:
+    build:
+      context: ./gateway
+    environment:
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis
+    expose:
+      - "8080"
+    networks:
+      - poc-net
+
+  room-service:
+    build:
+      context: ./room-service
+    container_name: poc-room-service
+    environment:
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis
+    expose:
+      - "8081"
+    networks:
+      - poc-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    container_name: poc-otel-collector
+    profiles: ["observability"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks:
+      - poc-net
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: poc-prometheus
+    profiles: ["observability"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - poc-net
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: poc-grafana
+    profiles: ["observability"]
+    ports:
+      - "3000:3000"
+    networks:
+      - poc-net
+
+  k6:
+    image: grafana/k6:0.52.0
+    container_name: poc-k6
+    profiles: ["loadtest"]
+    volumes:
+      - ./loadtest:/scripts:ro
+    entrypoint: ["k6", "run", "/scripts/load-test.js"]
+    depends_on:
+      - nginx
+    networks:
+      - poc-net
+
+networks:
+  poc-net:
+    driver: bridge
