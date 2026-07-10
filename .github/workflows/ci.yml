@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  go:
+    name: Go (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, room-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: ${{ matrix.service }}/go.sum
+
+      - name: Download dependencies
+        working-directory: ${{ matrix.service }}
+        run: go mod download
+
+      - name: Check formatting
+        working-directory: ${{ matrix.service }}
+        run: |
+          diff -u <(echo -n) <(gofmt -l .)
+
+      - name: Vet
+        working-directory: ${{ matrix.service }}
+        run: go vet ./...
+
+      - name: Test
+        working-directory: ${{ matrix.service }}
+        run: go test ./...
+
+      - name: Build
+        working-directory: ${{ matrix.service }}
+        run: go build ./...
+
+  docker:
+    name: Docker build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, room-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t ${{ matrix.service }}:ci ./${{ matrix.service }}
+
+  compose-config:
+    name: Validate docker-compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose file
+        run: docker compose config
