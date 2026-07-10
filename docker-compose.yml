@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Mapeamento para o Diagrama C4 Nível 2 (POC 1 — Real-Time):
 #   nginx          -> Load Balancer
 #   gateway        -> WebSocket Gateway + Rate Limiter + Broadcast (Go)
